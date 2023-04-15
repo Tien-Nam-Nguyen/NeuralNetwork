@@ -1,116 +1,84 @@
 import numpy as np
 import random
-import json
+
+class NeuNet:
+  def __init__(self, sizes):
+    self.sizes = sizes
+    self.num_layer = len(sizes)
+    self.wbinit()
+
+  def wbinit(self):
+    self.biases = [np.random(next_dim, 1) for next_dim in self.sizes[1:]]
+    self.weights = [np.random(x, y) for x,y in zip(self.sizes[1:], self.sizes[:-1])]
 
 
-class Network:
-
-    def __init__(self, sizes):
-        self.num_layers = len(sizes)
-        self.sizes = sizes
-        self.biases = []
-        self.weights = []
-        self.init()
-
-    def init(self):
-        self.biases = [np.random.randn(x, 1) for x in self.sizes[1:]]
-        self.weights = [np.random.randn(y, x) / np.sqrt(x) for x, y in zip(self.sizes[:-1], self.sizes[1:])]
-
-    def MGD(self, training_data, epochs, mini_batch_size, eta, lmbda, test_data=None):
-        if test_data:
-            n_test = len(test_data)
-        n = len(training_data)
-        for i in range(epochs):
-            random.shuffle(training_data)
-            mini_batches = [training_data[k:k + mini_batch_size] for k in range(0, n, mini_batch_size)]
-            for mini_batch in mini_batches:
-                self.update_batch(mini_batch, eta, lmbda, n)
-            if test_data:
-                print(f"Epoch {i}: {self.evaluate(test_data)} / {n_test}")
-            else:
-                print(f"Epoch {i} complete")
-
-    def update_batch(self, mini_batch, eta, lmbda, train_size):
-        n_batch = len(mini_batch)
-        nabla_w = [np.zeros(w.shape) for w in self.weights]
-        nabla_b = [np.zeros(b.shape) for b in self.biases]
-        for x, y in mini_batch:
-            delta_nabla_w, delta_nabla_b = self.backprop(x, y)
-            nabla_w = [nw + dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
-            nabla_b = [nb + dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
-        self.weights = [(1 - eta * lmbda / train_size) * w - (eta / n_batch) * nw for w, nw in zip(self.weights, nabla_w)]
-        self.biases = [b - (eta / n_batch) * nb for b, nb in zip(self.biases, nabla_b)]
-
-    def backprop(self, x, y):
-        # Forward propagation
-        activations = [x]
-        activation = x
-        zs = []
-        nabla_w = []
-        nabla_b = []
-        for w, b in zip(self.weights, self.biases):
-            z = np.dot(w, activation) + b
-            zs.append(z)
-            activation = sigmoid(z)
-            activations.append(activation)
-        # Backward propagation
-        delta = cost_derivative(activations[-1], y)
-        nabla_w.append(np.dot(delta, activations[-2].transpose()))
-        nabla_b.append(delta)
-        for i in range(2, self.num_layers):
-            sp = sigmoid_prime(zs[-i])
-            delta = np.dot(self.weights[-i + 1].transpose(), delta) * sp
-            nabla_b.insert(0, delta)
-            res = np.dot(delta, activations[-i-1].transpose())
-            nabla_w.insert(0, res)
-        return nabla_w, nabla_b
+  def train(self, x_train, y_train, batch_size, epoch=30, lr=0.001):
+    batches = [(x_train[i:i+batch_size], y_train[i:i+batch_size]) for i in range(0, len(x_train), batch_size)]
+    for ep in range(epoch):
+      for batch in batches:
+        self.update_param(batch[0], batch[1], 0.001)
 
 
 
+  def sigmoid(self, z):
+    return 1.0 / (1 + np.exp(-z))
 
-    def forward_prop(self, x):
-        a = x
-        for w, b in zip(self.weights, self.biases):
-            a = sigmoid(np.dot(w, a) + b)
-        return a
 
-    def evaluate(self, test_data):
-        res = [(np.argmax(self.forward_prop(x)), y) for x, y in test_data]
-        return sum(int(x == y) for x, y in res)
+  def sigmoid_prime(self, z):
+    return self.sigmoid(z) * (1 - self.sigmoid(z))
+
+
+  def update_param(self, batch_x, batch_y, lr):
+    zero_w = [np.zeros_like(w) for w in self.weights]
+    zero_b = [np.zeros_like(b) for b in self.biases]
+    for x, y in zip(batch_x, batch_y):
+      delta_w, delta_b = self.back_propagation(x, y)
+      zero_w = [zw + dw for zw, dw in zip(zero_w, delta_w)]
+      zero_b = [zb + db for zb, db in zip(zero_b, delta_b)]
     
-    def save(self, filename):
-        """Save the neural network to the file ``filename``."""
-        data = {"sizes": self.sizes,
-                "weights": [w.tolist() for w in self.weights],
-                "biases": [b.tolist() for b in self.biases],
-                }
-        f = open(filename, "w")
-        json.dump(data, f)
-        f.close()
+    self.weights = [w - lr * zw / len(batch_x) for w, zw in zip(self.weights, zero_w)]
+    self.biases = [b - lr * zb / len(batch_x) for b, zb in zip(self.biases, zero_b)]
 
-#### Loading a Network
-def load(filename):
-    """Load a neural network from the file ``filename``.  Returns an
-    instance of Network.
-
-    """
-    f = open(filename, "r")
-    data = json.load(f)
-    f.close()
-    net = Network(data["sizes"])
-    net.weights = [np.array(w) for w in data["weights"]]
-    net.biases = [np.array(b) for b in data["biases"]]
-    return net
+    
 
 
 
-def cost_derivative(a, y):
-    return a - y
+  def back_propagation(self, x, y):
+    list_a = [x]
+    nw = []
+    nb = []
+    zs = []
+    for w, b in zip(self.weights, self.biases):
+      res = np.dot(w, list_a[-1]) + b
+      zs.append(res)
+      res = self.sigmoid(res)
+      list_a.append(res)
+    
+
+    delta = self.delta_output(y, list_a[-1])
+    nw.append(np.dot(delta, list_a[-2].transpose()))
+    for i in range(2, self.num_layer):
+      sp = self.sigmoid_prime(z[-i])
+      delta = np.dot(self.weights[-i+1].transpose(), delta) * sp
+      nb.insert(0, delta)
+      res = np.dot(delta, list_a[-i-1].transpose())
+      nw.insert(0, res)
+    
+    return nw, nb
 
 
-def sigmoid(z):
-    return 1.0 / (1.0 + np.exp(-z))
+  
+  def delta_output(self, y, a):    
+    return (y - a) 
 
+  def feed_forward(self, x):
+    a = x
+    for w, b in zip(self.weights, self.biases):
+      a = self.sigmoid(np.dot(w, a) + b)
+    return a
 
-def sigmoid_prime(z):
-    return sigmoid(z) * (1 - sigmoid(z))
+  def evaluate(self, test_data):
+        res = [(np.argmax(self.feed_forward(x)), y) for x, y in test_data]
+        return sum(int(x == y) for x, y in res)
+   
+
